@@ -1,0 +1,42 @@
+FROM eclipse-temurin:17-jdk-alpine as build
+WORKDIR /workspace/app
+
+# Copy maven executable and pom.xml
+COPY mvnw .
+COPY .mvn .mvn
+COPY pom.xml .
+
+# Make the maven wrapper executable
+RUN chmod +x ./mvnw
+
+# Download all required dependencies
+RUN ./mvnw dependency:go-offline -B
+
+# Copy the project source
+COPY src src
+
+# Package the application
+RUN ./mvnw package -DskipTests
+RUN mkdir -p target/dependency && (cd target/dependency; jar -xf ../*.jar)
+
+# Production stage
+FROM eclipse-temurin:17-jre-alpine
+VOLUME /tmp
+
+# Create directory for uploaded files
+RUN mkdir -p /app/uploads
+RUN mkdir -p /app/data
+
+# Copy executable jar
+ARG DEPENDENCY=/workspace/app/target/dependency
+COPY --from=build ${DEPENDENCY}/BOOT-INF/lib /app/lib
+COPY --from=build ${DEPENDENCY}/META-INF /app/META-INF
+COPY --from=build ${DEPENDENCY}/BOOT-INF/classes /app
+
+# Set environment variables
+ENV SPRING_DATASOURCE_URL=jdbc:h2:file:/app/data/filedb
+ENV FILE_UPLOAD_DIR=/app/uploads
+
+EXPOSE 8080
+
+ENTRYPOINT ["java", "-cp", "app:app/lib/*", "com.filestore.FileStoreApplication"]
